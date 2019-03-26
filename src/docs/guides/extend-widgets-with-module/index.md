@@ -120,7 +120,8 @@ namespace CSSMap.OrchardCore
 ```
 
 ## Define the cssMapPart properties and settings
-In order to draw a map on screen, it is mandatory to give an Id, some options and the markup as described in the documentation of [CSSMAP PLUGIN](https://cssmapsplugin.com). Also when you add the Part to a widget, you need to setup what map we will display. Let's see the definition of the ContentPart first.
+In order to draw a map on screen, it is mandatory to give an Id, some options and the markup as described in the documentation of [CSSMAP PLUGIN](https://cssmapsplugin.com). Also when you add the Part to a widget, you need to setup what map we will display. First define the ContentPart.
+
 * Model (/Models/cssMapPart)
 ```
 using OrchardCore.ContentManagement;
@@ -166,6 +167,99 @@ namespace CSSMap.OrchardCore.ViewModels
     }
 }
 ```
+* Display Driver (Drivers/cssMapPartDisplayDriver.cs)
+```
+using CSSMap.OrchardCore.Models;
+using CSSMap.OrchardCore.ViewModels;
+using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Http;
+using Microsoft.Extensions.Localization;
+using OrchardCore.ContentManagement.Display.ContentDisplay;
+using OrchardCore.ContentManagement.Metadata;
+using OrchardCore.DisplayManagement.ModelBinding;
+using OrchardCore.DisplayManagement.Views;
+using OrchardCore.Settings;
+using OrchardCore.Mvc.ModelBinding;
+using System;
+using System.Linq;
+using System.Threading.Tasks;
+using OrchardCore.ContentManagement.Display.Models;
+using CSSMap.OrchardCore.Settings;
+
+namespace CSSMap.OrchardCore.Drivers
+{
+    public class cssMapPartDisplayDriver : ContentPartDisplayDriver<cssMapPart>
+    {
+        private readonly IContentDefinitionManager _contentDefinitionManager;
+        private readonly ISiteService _siteService;
+        private readonly IAuthorizationService _authorizationService;
+        private readonly IHttpContextAccessor _httpContextAccessor;
+        private readonly IStringLocalizer<cssMapPartDisplayDriver> T;
+
+        public cssMapPartDisplayDriver(
+            IContentDefinitionManager contentDefinitionManager,
+            ISiteService siteService,
+            IAuthorizationService authorizationService,
+            IHttpContextAccessor httpContextAccessor,
+            IStringLocalizer<cssMapPartDisplayDriver> localizer
+            )
+        {
+            _contentDefinitionManager = contentDefinitionManager;
+            _siteService = siteService;
+            _authorizationService = authorizationService;
+            _httpContextAccessor = httpContextAccessor;
+            T = localizer;
+        }
+
+        public override IDisplayResult Display(cssMapPart part, BuildPartDisplayContext context)
+        {
+            return Initialize<cssMapPartViewModel>("cssMapPart", m =>
+            {
+                m.cssMapPart = part;
+                m.Settings = GetcssMapPartSettings(part);
+                m.Id = part.Id;
+                m.Markup = part.Markup;
+                m.Options = part.Options;
+            })
+            .Location("Detail", "Content:5");
+
+        }
+
+        public override IDisplayResult Edit(cssMapPart part)
+        {
+            return Initialize<cssMapPartViewModel>("cssMapPart_Edit", model =>
+            {
+                model.Settings = GetcssMapPartSettings(part);
+                model.cssMapPart = part;
+                model.Id = part.Id;
+                model.Markup = part.Markup;
+                model.Options = part.Options;
+            });
+        }
+
+        private cssMapPartSettings GetcssMapPartSettings(cssMapPart part)
+        {
+            var contentTypeDefinition = _contentDefinitionManager.GetTypeDefinition(part.ContentItem.ContentType);
+            var contentTypePartDefinition = contentTypeDefinition.Parts.FirstOrDefault(x => String.Equals(x.PartDefinition.Name, nameof(cssMapPart), StringComparison.Ordinal));
+            return contentTypePartDefinition.GetSettings<cssMapPartSettings>();
+        }
+
+        public override async Task<IDisplayResult> UpdateAsync(cssMapPart model, IUpdateModel updater)
+        {
+            var viewModel = new cssMapPartViewModel();
+
+            await updater.TryUpdateModelAsync(viewModel, Prefix, t => t.Id, t => t.Markup, t => t.Options, t => t.Size);
+
+            model.Id = viewModel.Id;
+            model.Markup = viewModel.Markup;
+            model.Options = viewModel.Options;
+
+            return Edit(model);
+        }
+
+    }
+}
+```
 * Edit View (Views/cssMapPart.Edit.cshtml)
 ```
 @using CSSMap.OrchardCore.ViewModels;
@@ -199,3 +293,106 @@ namespace CSSMap.OrchardCore.ViewModels
 </fieldset>
 ```
 
+Now define the ContentPart's settings
+* Model (Settings/cssMapPartSettings.cs)
+```
+public string Markup { get; set; }
+public string Map { get; set; }
+public string StylesheetName { get; set; }
+```    
+* ViewModel (Settings/cssMapPartSettingsViewModel.cs)
+```
+using CSSMap.OrchardCore.Models;
+using System.ComponentModel.DataAnnotations;
+
+namespace CSSMap.OrchardCore.Settings
+{
+    public class cssMapPartSettingsViewModel
+    {
+        public string Markup { get; set; }
+        [Required(AllowEmptyStrings = false, ErrorMessage = "Map class is required")]
+        public string Map {get; set; }
+        public string StylesheetName { get; set; }
+        public cssMapPartSettings cssMapPartSettings { get; set; }
+    }
+}
+```
+* Driver (Settings/cssMapPartSettingsDisplayDriver.cs)
+```
+using System;
+using System.Linq;
+using System.Threading.Tasks;
+using CSSMap.OrchardCore.Models;
+using CSSMap.OrchardCore.Settings;
+using CSSMap.OrchardCore.ViewModels;
+using Microsoft.AspNetCore.Mvc.ModelBinding;
+using Microsoft.Extensions.Localization;
+using Newtonsoft.Json.Linq;
+using OrchardCore.ContentManagement.Metadata.Models;
+using OrchardCore.ContentTypes.Editors;
+using OrchardCore.DisplayManagement.ModelBinding;
+using OrchardCore.DisplayManagement.Views;
+
+namespace cssMap.OrchardCore.Settings
+{
+    public class cssMapPartSettingsDisplayDriver : ContentTypePartDefinitionDisplayDriver
+    {
+        private readonly IStringLocalizer<cssMapPartSettingsDisplayDriver> T;
+
+        public cssMapPartSettingsDisplayDriver(IStringLocalizer<cssMapPartSettingsDisplayDriver> localizer)
+        {
+            T = localizer;
+        }
+
+        public override IDisplayResult Edit(ContentTypePartDefinition contentTypePartDefinition, IUpdateModel updater)
+        {
+            if (!String.Equals(nameof(cssMapPart), contentTypePartDefinition.PartDefinition.Name, StringComparison.Ordinal))
+            {
+                return null;
+            }
+
+            return Initialize<cssMapPartSettingsViewModel>("cssMapPartSettings_Edit", model =>
+            {
+                model.cssMapPartSettings = contentTypePartDefinition.GetSettings<cssMapPartSettings>();
+                model.Map = model.cssMapPartSettings.Map;
+                model.Markup = model.cssMapPartSettings.Markup;
+                model.StylesheetName = model.cssMapPartSettings.StylesheetName;
+            }).Location("Content");
+        }
+
+        public override async Task<IDisplayResult> UpdateAsync(ContentTypePartDefinition contentTypePartDefinition, UpdateTypePartEditorContext context)
+        {
+            if (!String.Equals(nameof(cssMapPart), contentTypePartDefinition.PartDefinition.Name, StringComparison.Ordinal))
+            {
+                return null;
+            }
+
+            var model = new cssMapPartSettingsViewModel();
+
+            await context.Updater.TryUpdateModelAsync(model, Prefix,
+                m => m.Map,
+                m => m.Markup,
+                m => m.StylesheetName);
+
+
+            if (string.IsNullOrWhiteSpace(model.Map))
+            {
+                context.Updater.ModelState.AddModelError(nameof(model.Map), T["You must set an Id for the map"]);
+            }
+
+            if (context.Updater.ModelState.ValidationState == ModelValidationState.Valid)
+            {
+                model.cssMapPartSettings = new cssMapPartSettings()
+                {
+                    Map = model.Map,
+                    Markup = model.Markup,
+                    StylesheetName = model.StylesheetName
+                };
+                context.Builder.WithSettings(model.cssMapPartSettings);
+            }
+            return Edit(contentTypePartDefinition, context.Updater);
+        }
+
+    }
+}
+```
