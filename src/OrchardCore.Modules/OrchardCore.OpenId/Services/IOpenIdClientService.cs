@@ -10,5 +10,6 @@ namespace OrchardCore.OpenId.Services
         Task<OpenIdClientSettings> GetSettingsAsync();
         Task UpdateSettingsAsync(OpenIdClientSettings settings);
         Task<ImmutableArray<ValidationResult>> ValidateSettingsAsync(OpenIdClientSettings settings);
+        string Protect(string secret);
     }
 }

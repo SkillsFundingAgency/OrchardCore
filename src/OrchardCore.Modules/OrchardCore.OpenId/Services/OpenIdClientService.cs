@@ -2,11 +2,13 @@ using System;
 using System.Collections.Immutable;
 using System.ComponentModel.DataAnnotations;
 using System.Threading.Tasks;
+using Microsoft.AspNetCore.DataProtection;
 using Microsoft.Extensions.Localization;
 using Microsoft.IdentityModel.Protocols.OpenIdConnect;
 using Newtonsoft.Json.Linq;
 using OrchardCore.Entities;
 using OrchardCore.Environment.Shell;
+using OrchardCore.OpenId.Configuration;
 using OrchardCore.OpenId.Settings;
 using OrchardCore.Settings;
 
@@ -16,15 +18,16 @@ namespace OrchardCore.OpenId.Services
     {
         private readonly ISiteService _siteService;
         private readonly IStringLocalizer<OpenIdClientService> T;
-        private readonly ShellSettings _shellSettings;
+        private readonly IDataProtectionProvider _dataProtectionProvider;
 
         public OpenIdClientService(
             ISiteService siteService,
             ShellSettings shellSettings,
+            IDataProtectionProvider dataProtectionProvider,
             IStringLocalizer<OpenIdClientService> stringLocalizer)
         {
-            _shellSettings = shellSettings;
             _siteService = siteService;
+            _dataProtectionProvider = dataProtectionProvider;
             T = stringLocalizer;
         }
 
@@ -32,6 +35,12 @@ namespace OrchardCore.OpenId.Services
         {
             var container = await _siteService.GetSiteSettingsAsync();
             return container.As<OpenIdClientSettings>();
+        }
+
+        public string Protect(string secret)
+        {
+            var protector = _dataProtectionProvider.CreateProtector(nameof(OpenIdClientConfiguration));
+            return protector.Protect(secret);
         }
 
         public async Task UpdateSettingsAsync(OpenIdClientSettings settings)
@@ -110,9 +119,9 @@ namespace OrchardCore.OpenId.Services
                 }));
             }
 
-
-
             return Task.FromResult(results.ToImmutable());
         }
+
+
     }
 }

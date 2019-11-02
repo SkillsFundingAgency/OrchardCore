@@ -6,7 +6,6 @@ namespace OrchardCore.OpenId.ViewModels
     {
         [Required]
         public string DisplayName { get; set; }
-        public bool TestingModeEnabled { get; set; }
         [Required(ErrorMessage = "Authority is required")]
         public string Authority { get; set; }
         [Required(ErrorMessage = "ClientId is required")]

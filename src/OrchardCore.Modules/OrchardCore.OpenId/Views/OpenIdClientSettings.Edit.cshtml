@@ -123,7 +123,7 @@
 </fieldset>
 
 <fieldset class="form-group collapse" asp-validation-class-for="ClientSecret">
-    <label>@T["Client Secret"]</label>
+    <label asp-for="ClientSecret">@T["Client Secret"] (@T["enter a new value to replace the existing secret"])</label>
     <input asp-for="ClientSecret" class="form-control" type="password" autocomplete="off" />
     <span asp-validation-for="ClientSecret"></span>
     <span class="hint">@T["set client secret."]</span>

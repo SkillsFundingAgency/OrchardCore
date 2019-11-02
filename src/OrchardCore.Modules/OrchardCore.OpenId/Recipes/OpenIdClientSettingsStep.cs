@@ -1,6 +1,8 @@
 using System;
 using System.ComponentModel.DataAnnotations;
 using System.Threading.Tasks;
+using Microsoft.AspNetCore.DataProtection;
+using OrchardCore.OpenId.Configuration;
 using OrchardCore.OpenId.Services;
 using OrchardCore.Recipes.Models;
 using OrchardCore.Recipes.Services;
@@ -33,7 +35,10 @@ namespace OrchardCore.OpenId.Recipes
             settings.Authority = !string.IsNullOrEmpty(model.Authority) ? new Uri(model.Authority, UriKind.Absolute) : null;
             settings.CallbackPath = model.CallbackPath;
             settings.ClientId = model.ClientId;
-            settings.ClientSecret = model.ClientSecret;
+            if (!string.IsNullOrWhiteSpace(model.ClientSecret))
+            {
+                settings.ClientSecret = _clientService.Protect(model.ClientSecret);
+            }
             settings.DisplayName = model.DisplayName;
             settings.ResponseMode = model.ResponseMode;
             settings.ResponseType = model.ResponseType;
