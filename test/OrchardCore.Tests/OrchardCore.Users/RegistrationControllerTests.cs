@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Threading.Tasks;
@@ -6,6 +7,7 @@ using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Mvc.Localization;
+using Microsoft.AspNetCore.Mvc.ViewFeatures;
 using Microsoft.Extensions.Localization;
 using Microsoft.Extensions.Logging;
 using Moq;
@@ -30,41 +32,7 @@ namespace OrchardCore.Tests.OrchardCore.Users
         public async Task UsersShouldNotBeAbleToRegisterIfNotAllowed()
         {
             var mockUserManager = MockUserManager<IUser>().Object;
-            var settings = new RegistrationSettings { UsersCanRegister = false };
-            var mockSiteService = Mock.Of<ISiteService>(ss =>
-                ss.GetSiteSettingsAsync() == Task.FromResult(
-                    Mock.Of<ISite>(s => s.Properties == JObject.FromObject(new { RegistrationSettings = settings }))
-                    )
-            );
-            var mockSmtpService = Mock.Of<ISmtpService>();
-
-            var controller = new RegistrationController(
-                Mock.Of<IUserService>(), 
-                mockUserManager,
-                MockSignInManager(mockUserManager).Object,
-                Mock.Of<IAuthorizationService>(),
-                mockSiteService,
-                Mock.Of<INotifier>(),
-                mockSmtpService, 
-                Mock.Of<IDisplayHelper>(),
-                Mock.Of<ILogger<RegistrationController>>(),
-                Mock.Of<IHtmlLocalizer<RegistrationController>>(),
-                Mock.Of<IStringLocalizer<RegistrationController>>(),
-                Mock.Of<IEnumerable<IRegistrationFormEvents>>());
-
-            var result = await controller.Register();
-            Assert.IsType<NotFoundResult>(result);
-
-            // Post
-            result = await controller.Register(new RegisterViewModel());
-            Assert.IsType<NotFoundResult>(result);
-        }
-
-        [Fact]
-        public async Task UsersShouldBeAbleToRegisterIfAllowed()
-        {
-            var mockUserManager = MockUserManager<IUser>().Object;
-            var settings = new RegistrationSettings { UsersCanRegister = true };
+            var settings = new RegistrationSettings { UsersCanRegister = RegistrationSettings.UsersCanRegisterEnum.NoRegistration };
             var mockSiteService = Mock.Of<ISiteService>(ss =>
                 ss.GetSiteSettingsAsync() == Task.FromResult(
                     Mock.Of<ISite>(s => s.Properties == JObject.FromObject(new { RegistrationSettings = settings }))
@@ -79,12 +47,72 @@ namespace OrchardCore.Tests.OrchardCore.Users
                 Mock.Of<IAuthorizationService>(),
                 mockSiteService,
                 Mock.Of<INotifier>(),
-                mockSmtpService,
-                Mock.Of<IDisplayHelper>(),
                 Mock.Of<ILogger<RegistrationController>>(),
                 Mock.Of<IHtmlLocalizer<RegistrationController>>(),
-                Mock.Of<IStringLocalizer<RegistrationController>>(),
-                Enumerable.Empty<IRegistrationFormEvents>());
+                Mock.Of<IStringLocalizer<RegistrationController>>());
+
+            var result = await controller.Register();
+            Assert.IsType<NotFoundResult>(result);
+
+            // Post
+            result = await controller.Register(new RegisterViewModel());
+            Assert.IsType<NotFoundResult>(result);
+        }
+
+        [Fact]
+        public async Task UsersShouldBeAbleToRegisterIfAllowed()
+        {
+            var mockUserManager = MockUserManager<IUser>().Object;
+            var settings = new RegistrationSettings { UsersCanRegister = RegistrationSettings.UsersCanRegisterEnum.AllowRegistration};
+            var mockSiteService = Mock.Of<ISiteService>(ss =>
+                ss.GetSiteSettingsAsync() == Task.FromResult(
+                    Mock.Of<ISite>(s => s.Properties == JObject.FromObject(new { RegistrationSettings = settings }))
+                    )
+            );
+            var mockSmtpService = Mock.Of<ISmtpService>();
+
+            var controller = new RegistrationController(
+                Mock.Of<IUserService>(),
+                mockUserManager,
+                MockSignInManager(mockUserManager).Object,
+                Mock.Of<IAuthorizationService>(),
+                mockSiteService,
+                Mock.Of<INotifier>(),
+                Mock.Of<ILogger<RegistrationController>>(),
+                Mock.Of<IHtmlLocalizer<RegistrationController>>(),
+                Mock.Of<IStringLocalizer<RegistrationController>>());
+
+            var mockServiceProvider = new Mock<IServiceProvider>();
+            mockServiceProvider
+                .Setup(x => x.GetService(typeof(ISmtpService)))
+                .Returns(mockSmtpService);
+            mockServiceProvider
+                .Setup(x => x.GetService(typeof(UserManager<IUser>)))
+                .Returns(mockUserManager);
+            mockServiceProvider
+                .Setup(x => x.GetService(typeof(ISiteService)))
+                .Returns(mockSiteService);
+            mockServiceProvider
+                .Setup(x => x.GetService(typeof(IEnumerable<IRegistrationFormEvents>)))
+                .Returns(Enumerable.Empty<IRegistrationFormEvents>());
+            mockServiceProvider
+                .Setup(x => x.GetService(typeof(IUserService)))
+                .Returns(Mock.Of<IUserService>());
+            mockServiceProvider
+                .Setup(x => x.GetService(typeof(SignInManager<IUser>)))
+                .Returns(MockSignInManager(mockUserManager).Object);
+            mockServiceProvider
+                .Setup(x => x.GetService(typeof(ITempDataDictionaryFactory)))
+                .Returns(Mock.Of<ITempDataDictionaryFactory>());
+
+            
+
+            var mockHttpContext = new Mock<HttpContext>();
+            mockHttpContext
+                .Setup(x => x.RequestServices)
+                .Returns(mockServiceProvider.Object);
+
+            controller.ControllerContext.HttpContext = mockHttpContext.Object;
 
             var result = await controller.Register();
             Assert.IsType<ViewResult>(result);

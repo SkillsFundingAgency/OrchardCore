@@ -13,8 +13,11 @@ namespace OrchardCore.Users.Drivers
 
         public override IDisplayResult Edit(LoginSettings section)
         {
-            return Initialize<LoginSettings>("LoginSettings_Edit", model => {
+            return Initialize<LoginSettings>("LoginSettings_Edit", model =>
+            {
                 model.UseSiteTheme = section.UseSiteTheme;
+                model.UseExternalProviderIfOnlyOneDefined = section.UseExternalProviderIfOnlyOneDefined;
+                model.DisableLocalLogin = section.DisableLocalLogin;
             }).Location("Content:5").OnGroup(GroupId);
         }
 
