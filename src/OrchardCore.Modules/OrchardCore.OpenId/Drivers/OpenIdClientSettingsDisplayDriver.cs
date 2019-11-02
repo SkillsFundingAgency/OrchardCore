@@ -23,7 +23,6 @@ namespace OrchardCore.OpenId.Drivers
         private const string SettingsGroupId = "OrchardCore.OpenId.Client";
 
         private readonly IAuthorizationService _authorizationService;
-        private readonly IDataProtectionProvider _dataProtectionProvider;
         private readonly IHttpContextAccessor _httpContextAccessor;
         private readonly IOpenIdClientService _clientService;
         private readonly IShellHost _shellHost;
@@ -38,7 +37,6 @@ namespace OrchardCore.OpenId.Drivers
             ShellSettings shellSettings)
         {
             _authorizationService = authorizationService;
-            _dataProtectionProvider = dataProtectionProvider;
             _clientService = clientService;
             _httpContextAccessor = httpContextAccessor;
             _shellHost = shellHost;
@@ -166,8 +164,7 @@ namespace OrchardCore.OpenId.Drivers
                 }
                 else
                 {
-                    var protector = _dataProtectionProvider.CreateProtector(nameof(OpenIdClientConfiguration));
-                    settings.ClientSecret = protector.Protect(model.ClientSecret);
+                    settings.ClientSecret = _clientService.Protect(model.ClientSecret);
                 }
 
                 foreach (var result in await _clientService.ValidateSettingsAsync(settings))
