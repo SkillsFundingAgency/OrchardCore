@@ -21,7 +21,6 @@ namespace OrchardCore.OpenId.Services
 
         public OpenIdClientService(
             ISiteService siteService,
-            ShellSettings shellSettings,
             IDataProtectionProvider dataProtectionProvider,
             IStringLocalizer<OpenIdClientService> stringLocalizer)
         {
