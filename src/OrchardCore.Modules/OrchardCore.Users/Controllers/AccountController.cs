@@ -2,7 +2,6 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Security.Claims;
-using System.Security.Principal;
 using System.Threading.Tasks;
 using AspNet.Security.OpenIdConnect.Primitives;
 using Microsoft.AspNetCore.Authentication;
@@ -11,18 +10,21 @@ using Microsoft.AspNetCore.DataProtection;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Caching.Distributed;
-using Microsoft.Extensions.Caching.Memory;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Localization;
 using Microsoft.Extensions.Logging;
 using Newtonsoft.Json;
+using Newtonsoft.Json.Serialization;
 using OrchardCore.Entities;
 using OrchardCore.Modules;
 using OrchardCore.Scripting;
 using OrchardCore.Settings;
 using OrchardCore.Users.Events;
+using OrchardCore.Users.Handlers;
 using OrchardCore.Users.Models;
 using OrchardCore.Users.Services;
 using OrchardCore.Users.ViewModels;
+using IWorkflowManager = OrchardCore.Workflows.Services.IWorkflowManager;
 using SignInResult = Microsoft.AspNetCore.Identity.SignInResult;
 
 namespace OrchardCore.Users.Controllers
@@ -40,7 +42,7 @@ namespace OrchardCore.Users.Controllers
         private readonly IDataProtectionProvider _dataProtectionProvider;
         private readonly IClock _clock;
         private readonly IDistributedCache _distributedCache;
-
+        private readonly IEnumerable<IExternalLoginEventHandler> _externalLoginHandlers;
 
         public AccountController(
             IUserService userService,
@@ -53,7 +55,8 @@ namespace OrchardCore.Users.Controllers
             IScriptingManager scriptingManager,
             IClock clock,
             IDistributedCache distributedCache,
-            IDataProtectionProvider dataProtectionProvider)
+            IDataProtectionProvider dataProtectionProvider,
+            IEnumerable<IExternalLoginEventHandler> externalLoginHandlers)
         {
             _signInManager = signInManager;
             _userManager = userManager;
@@ -65,6 +68,7 @@ namespace OrchardCore.Users.Controllers
             _clock = clock;
             _distributedCache = distributedCache;
             _dataProtectionProvider = dataProtectionProvider;
+            _externalLoginHandlers = externalLoginHandlers;
             T = stringLocalizer;
         }
 
@@ -81,7 +85,6 @@ namespace OrchardCore.Users.Controllers
 
             // Clear the existing external cookie to ensure a clean login process
             await HttpContext.SignOutAsync(IdentityConstants.ExternalScheme);
-
 
             var loginSettings = (await _siteService.GetSiteSettingsAsync()).As<LoginSettings>();
             if (loginSettings.UseExternalProviderIfOnlyOneDefined)
@@ -105,7 +108,6 @@ namespace OrchardCore.Users.Controllers
             ViewData["ReturnUrl"] = returnUrl;
             return View();
         }
-
 
         [HttpGet]
         [AllowAnonymous]
@@ -140,7 +142,6 @@ namespace OrchardCore.Users.Controllers
             }
             return RedirectToAction(nameof(Login));
         }
-
 
         async Task<bool> AddConfirmEmailError(IUser user)
         {
@@ -193,7 +194,7 @@ namespace OrchardCore.Users.Controllers
                                 {
                                     _logger.LogInformation(1, "User logged in.");
                                     await _accountEvents.InvokeAsync(a => a.LoggedInAsync(model.UserName), _logger);
-                                    return RedirectToLocal(returnUrl);
+                                    return await LoggedInActionResult(user, returnUrl);
                                 }
 
                                 ModelState.AddModelError(string.Empty, T["Invalid login attempt."]);
@@ -265,6 +266,23 @@ namespace OrchardCore.Users.Controllers
             }
         }
 
+        private async Task<IActionResult> LoggedInActionResult(IUser user, string returnUrl = null, ExternalLoginInfo info = null)
+        {
+            var workflowManager = HttpContext.RequestServices.GetService<IWorkflowManager>();
+            if (workflowManager != null)
+            {
+                var input = new Dictionary<string, object>();
+                input["UserName"] = user.UserName;
+                input["Claims"] = info == null ? Enumerable.Empty<SerializableClaim>() : info.Principal.GetSerializableClaims();
+                input["Roles"] = ((User)user).RoleNames;
+                input["Provider"] = info?.LoginProvider;
+                await workflowManager.TriggerEventAsync(nameof(Workflows.Activities.UserLoggedInEvent),
+                    input: input, correlationId: ((User)user).Id.ToString());
+            }
+            return RedirectToLocal(returnUrl);
+        }
+
+
         [HttpPost]
         [AllowAnonymous]
         [ValidateAntiForgeryToken]
@@ -274,6 +292,57 @@ namespace OrchardCore.Users.Controllers
             var redirectUrl = Url.Action(nameof(ExternalLoginCallback), "Account", new { returnUrl });
             var properties = _signInManager.ConfigureExternalAuthenticationProperties(provider, redirectUrl);
             return Challenge(properties, provider);
+        }
+
+        private async Task<SignInResult> ExternalLoginSignInAsync(IUser user, ExternalLoginInfo info)
+        {
+            var claims = info.Principal.GetSerializableClaims();
+            var userRoles = await _userManager.GetRolesAsync(user);
+            var context = new UpdateRolesContext(user, info.LoginProvider, claims, userRoles);
+
+            string[] rolesToAdd = new string[0];
+            string[] rolesToRemove = new string[0];
+
+            var loginSettings = (await _siteService.GetSiteSettingsAsync()).As<LoginSettings>();
+            if (loginSettings.UseScriptToSyncRoles)
+            {
+                try
+                {
+                    var jsonSerializerSettings = new JsonSerializerSettings()
+                    {
+                        ContractResolver = new CamelCasePropertyNamesContractResolver()
+                    };
+                    var script = $"js: function syncRoles(context) {{\n{loginSettings.SyncRolesScript}\n}}\nvar context={JsonConvert.SerializeObject(context, jsonSerializerSettings)};\nsyncRoles(context);\nreturn context;";
+                    dynamic evaluationResult = _scriptingManager.Evaluate(script, null, null, null);
+                    rolesToAdd = (evaluationResult.rolesToAdd as object[]).Select(i => i.ToString()).ToArray();
+                    rolesToRemove = (evaluationResult.rolesToRemove as object[]).Select(i => i.ToString()).ToArray();
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogError(ex, "Error Syncing Roles From External Provider {0}", info.LoginProvider);
+                }
+            }
+            else
+            {
+                foreach (var item in _externalLoginHandlers)
+                {
+                    try
+                    {
+                        await item.UpdateRoles(context);
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogError(ex, "{externalLoginHandler} - IExternalLoginHandler.UpdateRoles threw an exception", item.GetType());
+                    }
+                }
+                rolesToAdd = context.RolesToAdd;
+                rolesToRemove = context.RolesToRemove;
+            }
+
+            await _userManager.AddToRolesAsync(user, rolesToAdd.Distinct());
+            await _userManager.RemoveFromRolesAsync(user, rolesToRemove.Distinct());
+
+            return await _signInManager.ExternalLoginSignInAsync(info.LoginProvider, info.ProviderKey, isPersistent: false, bypassTwoFactor: true);
         }
 
         [HttpGet]
@@ -301,10 +370,11 @@ namespace OrchardCore.Users.Controllers
                 if (!await AddConfirmEmailError(user))
                 {
                     await _accountEvents.InvokeAsync(i => i.LoggingInAsync(user.UserName, (key, message) => ModelState.AddModelError(key, message)), _logger);
-                    var signInResult = await _signInManager.ExternalLoginSignInAsync(info.LoginProvider, info.ProviderKey, isPersistent: false, bypassTwoFactor: true);
+
+                    var signInResult = await ExternalLoginSignInAsync(user, info);
                     if (signInResult.Succeeded)
                     {
-                        return RedirectToLocal(returnUrl);
+                        return await LoggedInActionResult(user, returnUrl, info);
                     }
                     else
                     {
@@ -348,7 +418,7 @@ namespace OrchardCore.Users.Controllers
                         externalLoginViewModel.NoEmail = registrationSettings.NoEmailForExternalUsers;
                         externalLoginViewModel.NoUsername = registrationSettings.NoUsernameForExternalUsers;
 
-
+                        // If registrationSettings.NoUsernameForExternalUsers is true, this username will not be used
                         externalLoginViewModel.UserName = await GenerateUsername(info);
                         externalLoginViewModel.Email = email;
 
@@ -378,10 +448,10 @@ namespace OrchardCore.Users.Controllers
 
                                     // We have created/linked to the local user, so we must verify the login.
                                     // If it does not succeed, the user is not allowed to login
-                                    var signInResult = await _signInManager.ExternalLoginSignInAsync(info.LoginProvider, info.ProviderKey, isPersistent: false, bypassTwoFactor: true);
+                                    var signInResult = await ExternalLoginSignInAsync(user, info);
                                     if (signInResult.Succeeded)
                                     {
-                                        return RedirectToLocal(returnUrl);
+                                        return await LoggedInActionResult(user, returnUrl, info);
                                     }
                                     else
                                     {
@@ -461,15 +531,13 @@ namespace OrchardCore.Users.Controllers
                     if (identityResult.Succeeded)
                     {
                         _logger.LogInformation(3, "User account linked to {provider} provider.", info.LoginProvider);
+
                         // we have created/linked to the local user, so we must verify the login. If it does not succeed,
                         // the user is not allowed to login
-                        if ((await _signInManager.ExternalLoginSignInAsync(info.LoginProvider, info.ProviderKey, false)).Succeeded)
+                        var signInResult = await ExternalLoginSignInAsync(user, info);
+                        if (signInResult.Succeeded)
                         {
-                            return RedirectToLocal(returnUrl);
-                        }
-                        else
-                        {
-
+                            return await LoggedInActionResult(user, returnUrl, info);
                         }
                     }
                     AddIdentityErrors(identityResult);
@@ -523,7 +591,7 @@ namespace OrchardCore.Users.Controllers
                     // the user is not allowed to login
                     if ((await _signInManager.ExternalLoginSignInAsync(info.LoginProvider, info.ProviderKey, false)).Succeeded)
                     {
-                        return RedirectToLocal(returnUrl);
+                        return await LoggedInActionResult(user, returnUrl, info);
                     }
                 }
                 AddIdentityErrors(identityResult);
@@ -619,29 +687,62 @@ namespace OrchardCore.Users.Controllers
 
         async Task<string> GenerateUsername(ExternalLoginInfo info)
         {
-            var settings = (await _siteService.GetSiteSettingsAsync()).As<RegistrationSettings>();
-            var claims = info == null ? "[]" : JsonConvert.SerializeObject(info.Principal.Claims.Select(c => new { c.Issuer, c.OriginalIssuer, c.Properties, c.Type, c.Value, c.ValueType }));
+            var now = new TimeSpan(_clock.UtcNow.Ticks) - new TimeSpan(DateTime.UnixEpoch.Ticks);
+            var ret = string.Concat("u" + Convert.ToInt32(now.TotalSeconds).ToString());
 
-            var script = $"js: function generateUsernameFromExternalLoginInfo(provider,claims) {{\n{settings.GenerateUsernameScript}\n}}\nreturn generateUsernameFromExternalLoginInfo('{info?.LoginProvider}',{claims});";
-            try
+            var registrationSettings = (await _siteService.GetSiteSettingsAsync()).As<RegistrationSettings>();
+
+            var externalClaims = info == null ? null : info.Principal.GetSerializableClaims();
+
+            if (registrationSettings.UseScriptToGenerateUsername)
             {
-                var evaluationResult = _scriptingManager.Evaluate(script, null, null, null);
-                if (evaluationResult == null)
-                    throw new Exception("GenerateUsernameScript did not return a username");
-                return evaluationResult as string;
+                var context = new { userName = string.Empty, loginProvider = info?.LoginProvider, externalClaims };
+                var jsonSerializerSettings = new JsonSerializerSettings()
+                {
+                    ContractResolver = new CamelCasePropertyNamesContractResolver()
+                };
+                var script = $"js: function generateUsername(context) {{\n{registrationSettings.GenerateUsernameScript}\n}}\nvar context = {JsonConvert.SerializeObject(context, jsonSerializerSettings)};\ngenerateUsername(context);\nreturn context;";
+                try
+                {
+                    dynamic evaluationResult = _scriptingManager.Evaluate(script, null, null, null);
+                    if (evaluationResult?.userName == null)
+                        throw new Exception("GenerateUsernameScript did not return a username");
+                    return evaluationResult.userName;
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogError(ex, "Error evaluating GenerateUsernameScript({context})", context);
+                }
             }
-            catch (Exception ex)
+            else
             {
-
-                _logger.LogWarning("Suspicious login detected from external provider. {provider} with key [{providerKey}] for {identity}",
-                    info.LoginProvider, info.ProviderKey, info.Principal?.Identity?.Name);
-
-                _logger.LogError(ex, "Error evaluating GenerateUsernameScript( '{provider}',{claims} ) for {identity}",
-                    info?.LoginProvider, claims, info.Principal?.Identity?.Name);
+                var userNames = new Dictionary<Type, string>();
+                foreach (var item in _externalLoginHandlers)
+                {
+                    try
+                    {
+                        var userName = await item.GenerateUserName(info.LoginProvider, externalClaims.ToArray());
+                        if (!string.IsNullOrWhiteSpace(userName))
+                        {
+                            if (userNames.Count == 0)
+                            {
+                                ret = userName;
+                            }
+                            userNames.Add(item.GetType(), userName);
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogError(ex, "{externalLoginHandler} - IExternalLoginHandler.GenerateUserName threw an exception", item.GetType());
+                    }
+                }
+                if (userNames.Count > 1)
+                {
+                    _logger.LogWarning("More than one IExternalLoginHandler generated username. Used first one registered, {externalLoginHandler}", userNames.FirstOrDefault().Key);
+                }
             }
-            var now = (new TimeSpan(DateTime.UtcNow.Ticks) - new TimeSpan(DateTime.UnixEpoch.Ticks));
-            return string.Concat("u" + Convert.ToInt32(now.TotalSeconds).ToString());
+
+            return ret;
         }
-
     }
 }
