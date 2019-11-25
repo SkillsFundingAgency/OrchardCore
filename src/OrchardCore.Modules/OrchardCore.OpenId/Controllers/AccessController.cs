@@ -83,10 +83,10 @@ namespace OrchardCore.OpenId.Controllers
 
             var authorizations = await _authorizationManager.FindAsync(
                 subject: result.Principal.GetUserIdentifier(),
-                client : await _applicationManager.GetIdAsync(application),
-                status : OpenIddictConstants.Statuses.Valid,
-                type   : OpenIddictConstants.AuthorizationTypes.Permanent,
-                scopes : ImmutableArray.CreateRange(request.GetScopes()));
+                client: await _applicationManager.GetIdAsync(application),
+                status: OpenIddictConstants.Statuses.Valid,
+                type: OpenIddictConstants.AuthorizationTypes.Permanent,
+                scopes: ImmutableArray.CreateRange(request.GetScopes()));
 
             switch (await _applicationManager.GetConsentTypeAsync(application))
             {
@@ -144,10 +144,10 @@ namespace OrchardCore.OpenId.Controllers
 
             var authorizations = await _authorizationManager.FindAsync(
                 subject: User.GetUserIdentifier(),
-                client : await _applicationManager.GetIdAsync(application),
-                status : OpenIddictConstants.Statuses.Valid,
-                type   : OpenIddictConstants.AuthorizationTypes.Permanent,
-                scopes : ImmutableArray.CreateRange(request.GetScopes()));
+                client: await _applicationManager.GetIdAsync(application),
+                status: OpenIddictConstants.Statuses.Valid,
+                type: OpenIddictConstants.AuthorizationTypes.Permanent,
+                scopes: ImmutableArray.CreateRange(request.GetScopes()));
 
             // Note: the same check is already made in the GET action but is repeated
             // here to ensure a malicious user can't abuse this POST endpoint and
@@ -349,10 +349,10 @@ namespace OrchardCore.OpenId.Controllers
 
             var authorizations = await _authorizationManager.FindAsync(
                 subject: principal.GetUserIdentifier(),
-                client : await _applicationManager.GetIdAsync(application),
-                status : OpenIddictConstants.Statuses.Valid,
-                type   : OpenIddictConstants.AuthorizationTypes.Permanent,
-                scopes : ImmutableArray.CreateRange(request.GetScopes()));
+                client: await _applicationManager.GetIdAsync(application),
+                status: OpenIddictConstants.Statuses.Valid,
+                type: OpenIddictConstants.AuthorizationTypes.Permanent,
+                scopes: ImmutableArray.CreateRange(request.GetScopes()));
 
             // If the application is configured to use external consent,
             // reject the request if no existing authorization can be found.
@@ -430,7 +430,7 @@ namespace OrchardCore.OpenId.Controllers
             Debug.Assert(request.IsAuthorizationRequest() || request.IsTokenRequest(),
                 "The request should be an authorization or token request.");
 
-            var identity = (ClaimsIdentity) principal.Identity;
+            var identity = (ClaimsIdentity)principal.Identity;
 
             // Note: make sure this claim is not added multiple times (which may happen when the principal
             // was extracted from an authorization code or from a refresh token ticket is re-used as-is).
@@ -468,11 +468,11 @@ namespace OrchardCore.OpenId.Controllers
                 if (authorization == null && request.IsAuthorizationRequest())
                 {
                     authorization = await _authorizationManager.CreateAsync(
-                        principal : ticket.Principal,
-                        subject   : principal.GetUserIdentifier(),
-                        client    : await _applicationManager.GetIdAsync(application),
-                        type      : OpenIddictConstants.AuthorizationTypes.Permanent,
-                        scopes    : ImmutableArray.CreateRange(ticket.GetScopes()),
+                        principal: ticket.Principal,
+                        subject: principal.GetUserIdentifier(),
+                        client: await _applicationManager.GetIdAsync(application),
+                        type: OpenIddictConstants.AuthorizationTypes.Permanent,
+                        scopes: ImmutableArray.CreateRange(ticket.GetScopes()),
                         properties: ImmutableDictionary.CreateRange(ticket.Properties.Items));
                 }
 
@@ -502,9 +502,9 @@ namespace OrchardCore.OpenId.Controllers
 
                 // Only add the iterated claim to the id_token if the corresponding scope was granted to the client application.
                 // The other claims will only be added to the access_token, which is encrypted when using the default format.
-                if ((claim.Type == OpenIddictConstants.Claims.Name && ticket.HasScope(OpenIddictConstants.Scopes.Profile)) ||
-                    (claim.Type == OpenIddictConstants.Claims.Email && ticket.HasScope(OpenIddictConstants.Scopes.Email)) ||
-                    (claim.Type == OpenIddictConstants.Claims.Role && ticket.HasScope(OpenIddictConstants.Claims.Roles)) ||
+                if (((claim.Type == OpenIddictConstants.Claims.Name || claim.Type == ClaimTypes.Name) && ticket.HasScope(OpenIddictConstants.Scopes.Profile)) ||
+                    ((claim.Type == OpenIddictConstants.Claims.Email || claim.Type == ClaimTypes.Email) && ticket.HasScope(OpenIddictConstants.Scopes.Email)) ||
+                    ((claim.Type == OpenIddictConstants.Claims.Role || claim.Type == ClaimTypes.Role) && ticket.HasScope(OpenIddictConstants.Claims.Roles)) ||
                     (claim.Type == OpenIdConstants.Claims.EntityType))
                 {
                     destinations.Add(OpenIddictConstants.Destinations.IdentityToken);
