@@ -171,6 +171,8 @@ namespace OrchardCore.Modules
 
                     var settingsProvider = scope.ServiceProvider.GetService<IBackgroundTaskSettingsProvider>();
 
+                    var localClock = scope.ServiceProvider.GetService<ILocalClock>();
+
                     _changeTokens[tenant] = settingsProvider?.ChangeToken ?? NullChangeToken.Singleton;
 
                     foreach (var task in tasks)
@@ -179,7 +181,7 @@ namespace OrchardCore.Modules
 
                         if (!_schedulers.TryGetValue(tenant + taskName, out var scheduler))
                         {
-                            _schedulers[tenant + taskName] = scheduler = new BackgroundTaskScheduler(tenant, taskName, referenceTime);
+                            _schedulers[tenant + taskName] = scheduler = new BackgroundTaskScheduler(tenant, taskName, referenceTime, localClock);
                         }
 
                         if (!scheduler.Released && scheduler.Updated)
