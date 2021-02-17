@@ -1,10 +1,10 @@
+using System.Threading.Tasks;
 using OrchardCore.Data.Migration;
 using OrchardCore.AdminDashboard.Indexes;
 using YesSql.Sql;
 using OrchardCore.ContentManagement.Metadata;
 using OrchardCore.ContentManagement.Metadata.Settings;
 using OrchardCore.Recipes.Services;
-using System.Threading.Tasks;
 
 namespace OrchardCore.AdminDashboard
 {
@@ -33,7 +33,7 @@ namespace OrchardCore.AdminDashboard
             return 1;
         }
 
-        public async Task<int> UpdateFrom1()
+        public async Task<int> UpdateFrom1Async()
         {
             await _recipeMigrator.ExecuteAsync("dashboard-widgets.recipe.json", this);
 
